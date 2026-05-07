@@ -20,17 +20,17 @@ def process():
     
     file = request.files['file']
     
-    # 1. Convert image to Base64 so the Proxy/OpenAI can 'see' it
+    # 1. Convert image to Base64 so 4o-mini can see it
     image_base64 = base64.b64encode(file.read()).decode('utf-8')
     
-    # 2. Correct Payload for GPT-4o with Vision
+    # 2. Payload for GPT-4o-mini with Vision
     payload = {
-        "model": "gpt-4o", 
+        "model": "gpt-4o-mini", 
         "messages": [
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Extract the business name, phone number, and address from this lead. Return only the data."},
+                    {"type": "text", "text": "Extract business name, phone, and address from this image. Output as plain text."},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
                 ]
             }
@@ -38,7 +38,7 @@ def process():
         "max_tokens": 500
     }
 
-    # 3. USE THE CORRECT HEADER: X-Proxy-Auth
+    # 3. USE THE HEADER FROM YOUR NOTES
     proxy_headers = {
         "X-Proxy-Auth": PROXY_SECRET_KEY,
         "Content-Type": "application/json"
