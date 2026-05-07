@@ -5,7 +5,6 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 # --- CONFIGURATION (Pulled from Railway Variables) ---
-# Use the Public URL of your proxy service
 PROXY_URL = "https://openai-proxy-production-94e0.up.railway.app/v1/chat/completions"
 PROXY_SECRET_KEY = os.getenv("PROXY_SECRET_KEY")
 
@@ -16,13 +15,16 @@ AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 
 @app.route('/process', methods=['POST'])
 def process():
+    # 1. Validation Checks
+    if not PROXY_SECRET_KEY:
+        return jsonify({"status": "error", "message": "PROXY_SECRET_KEY is missing from Railway variables"}), 500
+    
     if 'file' not in request.files:
         return jsonify({"status": "error", "message": "No file uploaded"}), 400
     
     file = request.files['file']
     
-    # 1. Prepare the payload for the OpenAI Proxy
-    # Note: We are assuming your proxy handles image-to-text conversion
+    # 2. Prepare the payload for the OpenAI Proxy
     payload = {
         "model": "gpt-4o", 
         "messages": [
@@ -33,30 +35,45 @@ def process():
         ]
     }
 
-    # 2. Add the Secret Key 'Password' to the headers
-    headers = {
+    # 3. Add the Secret Key 'Password' to the headers
+    proxy_headers = {
         "Authorization": f"Bearer {PROXY_SECRET_KEY}",
         "Content-Type": "application/json"
     }
 
     try:
-        # 3. Call the Proxy
+        # 4. Call the Proxy
         print(f"Calling Proxy at: {PROXY_URL}")
-        resp = requests.post(PROXY_URL, json=payload, headers=headers, timeout=60)
-        resp_data = resp.json()
-
+        resp = requests.post(PROXY_URL, json=payload, headers=proxy_headers, timeout=60)
+        
         if resp.status_code != 200:
-            return jsonify({"status": "error", "message": resp_data}), resp.status_code
+            return jsonify({"status": "error", "message": f"Proxy Error: {resp.text}"}), resp.status_code
 
-        # 4. Extract data (Adjust this based on your Proxy's exact output)
+        resp_data = resp.json()
         content = resp_data['choices'][0]['message']['content']
 
-        # 5. Push to Airtable
+        # 5. Push to Airtable (Fixed Payload Structure)
         airtable_url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
-        at_headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}", "Content-Type": "application/json"}
-        at_payload = {"fields": {"Raw Data": content}} # Adjust field name to match your table
+        at_headers = {
+            "Authorization": f"Bearer {AIRTABLE_API_KEY}", 
+            "Content-Type": "application/json"
+        }
         
-        requests.post(airtable_url, json=at_payload, headers=at_headers)
+        # Airtable REQUIRES a 'records' list
+        at_payload = {
+            "records": [
+                {
+                    "fields": {
+                        "Raw Data": content  # Make sure this column name matches Airtable EXACTLY
+                    }
+                }
+            ]
+        }
+        
+        at_resp = requests.post(airtable_url, json=at_payload, headers=at_headers)
+        
+        if at_resp.status_code != 200:
+            print(f"Airtable Error: {at_resp.text}")
 
         return jsonify({"status": "success", "data": content})
 
@@ -64,4 +81,6 @@ def process():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    # Railway uses the PORT environment variable
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
