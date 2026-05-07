@@ -4,6 +4,7 @@ import base64
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # Allow up to 16MB
 
 # --- CONFIGURATION ---
 PROXY_URL = "https://openai-proxy-production-94e0.up.railway.app/v1/chat/completions"
