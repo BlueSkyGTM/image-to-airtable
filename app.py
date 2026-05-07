@@ -7,36 +7,32 @@ from pyairtable import Api
 
 app = Flask(__name__)
 
-# --- CONFIG (From Railway Variables) ---
-PROXY_URL = os.getenv("PROXY_URL") # Your Railway Proxy
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# --- CONFIG ---
+# Using your private internal address
+PROXY_URL = "http://openai-proxy.railway.internal/v1/chat/completions" 
 AIRTABLE_TOKEN = os.getenv("AIRTABLE_TOKEN")
 AIRTABLE_BASE = os.getenv("AIRTABLE_BASE")
 AIRTABLE_TABLE = os.getenv("AIRTABLE_TABLE", "Contacts")
 
-# Initialize Airtable
 airtable_api = Api(AIRTABLE_TOKEN)
 table = airtable_api.table(AIRTABLE_BASE, AIRTABLE_TABLE)
 
+# Updated prompt with exact Airtable column names
 SCRAPE_PROMPT = """Extract contact info from this QuickBooks screenshot. 
-Return ONLY valid JSON, no markdown:
-{"company":"","first_name":"","last_name":"","email":"","company_phone":"","city":"","state":"","products":"","customer_type":"","customer_lifetime":"","company_id":"","confidence":"high|medium|low"}"""
+Return ONLY valid JSON, no markdown. Use these EXACT keys:
+{"Company":"","First Name":"","Last Name":"","Email":"","Direct Phone":"","City":"","State":"","Products":"","Customer Type":"","Customer Lifetime":""}"""
 
 @app.route('/process', methods=['POST'])
 def process():
-    if 'file' not in request.files:
+    file = request.files.get('file')
+    if not file:
         return jsonify({"error": "No file"}), 400
-    
-    file = request.files['file']
-    filename = file.filename
 
     try:
-        # 1. Encode Image
         b64 = base64.b64encode(file.read()).decode()
-
-        # 2. Call your Proxy
+        
         payload = {
-            "model": "gpt-5-chat-latest",
+            "model": "gpt-4o", # Using gpt-4o via your proxy
             "messages": [
                 {
                     "role": "user",
@@ -49,19 +45,15 @@ def process():
             "response_format": {"type": "json_object"}
         }
 
-        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
-        resp = requests.post(PROXY_URL, json=payload, headers=headers, timeout=60)
+        # Sending to your "Not your grandmother's proxy"
+        resp = requests.post(PROXY_URL, json=payload, timeout=60)
         resp.raise_for_status()
         
-        # 3. Parse and add Metadata
-        clean_data = resp.json()["choices"][0]["message"]["content"]
-        data_dict = json.loads(clean_data)
-        data_dict["Source_File"] = filename
+        # Parse result and send to Airtable
+        gpt_data = json.loads(resp.json()["choices"][0]["message"]["content"])
+        table.create(gpt_data)
 
-        # 4. Send to Airtable
-        table.create(data_dict)
-
-        return jsonify({"status": "success", "file": filename})
+        return jsonify({"status": "success"})
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
